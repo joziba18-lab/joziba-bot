@@ -1,11 +1,18 @@
-from telegram.ext import Updater, MessageHandler, Filters
-from threading import Thread
-import time
 import json
+import time
+import asyncio
+from threading import Thread
+from telegram import Update
+from telegram.ext import (
+    Application,
+    MessageHandler,
+    filters,
+    ContextTypes,
+)
 
-TOKEN = "8545215091:AAFZpTT3ixpLE8FyGFPkdtvuKKLLa1k_kF8"   # Bu yerga tokeningizni qo'ying
-CHANNEL_ID = -1003208764522          # Sizning kanalingiz ID
-EXPIRE_TIME = 90 * 24 * 3600         # 3 oy = 90 kun
+TOKEN = "8545215091:AAFZpTT3ixpLE8FyGFPkdtvuKKLLa1k_kF8"  # Tokeningiz
+CHANNEL_ID = -1003208764522                                # Kanal ID
+EXPIRE_TIME = 90 * 24 * 3600                               # 3 oy
 
 DB_FILE = "users.json"
 
@@ -23,16 +30,20 @@ def save_db(db):
         json.dump(db, f)
 
 
-def new_member(update, context):
+async def new_member(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Yangi a’zolarni DB ga yozamiz"""
     db = load_db()
+
     for member in update.message.new_chat_members:
         user_id = str(member.id)
-        db[user_id] = int(time.time())  # qo‘shilgan vaqtni saqlash
+        db[user_id] = int(time.time())
+
         save_db(db)
         print(f"{member.full_name} qo‘shildi — vaqt saqlandi.")
 
 
-def checker(context):
+async def checker(app: Application):
+    """Har 1 soatda muddat tugaganlarni chiqarib turadi"""
     while True:
         db = load_db()
         now = int(time.time())
@@ -40,32 +51,42 @@ def checker(context):
         for user_id, join_time in list(db.items()):
             if now - join_time >= EXPIRE_TIME:
                 try:
-                    context.bot.kick_chat_member(CHANNEL_ID, int(user_id))
+                    # Kanalga a’zoni chiqarish
+                    await app.bot.ban_chat_member(CHANNEL_ID, int(user_id))
 
-                    context.bot.send_message(
+                    # Foydalanuvchiga xabar yuborish
+                    await app.bot.send_message(
                         chat_id=int(user_id),
-                        text="Assalomu alaykum, sizning Joziba 18+ Premium kanalidagi obuna muddatingiz tugadi. Kanaldan foydala olmaysiz. Obunani davom ettirish uchun menedjeringizga murojaat qiling."
+                        text=(
+                            "Assalomu alaykum!\n"
+                            "Sizning Joziba 18+ Premium kanalidagi obuna muddatingiz tugadi.\n"
+                            "Davom ettirish uchun menedjeringizga murojaat qiling."
+                        )
                     )
 
                     print(f"{user_id} chiqarildi va xabar yuborildi.")
+
                 except Exception as e:
                     print("Xato:", e)
 
                 del db[user_id]
                 save_db(db)
 
-        time.sleep(3600)  # Har 1 soatda tekshiramiz
+        await asyncio.sleep(3600)  # 1 soat kutish
 
 
-updater = Updater(TOKEN, use_context=True)
+async def main():
+    app = Application.builder().token(TOKEN).build()
 
-updater.dispatcher.add_handler(
-    MessageHandler(Filters.status_update.new_chat_members, new_member)
-)
+    # Yangi a’zo handler
+    app.add_handler(MessageHandler(filters.StatusUpdate.NEW_CHAT_MEMBERS, new_member))
 
-t = Thread(target=checker, args=(updater.bot,))
-t.daemon = True
-t.start()
+    # Checker fon jarayoni
+    Thread(target=lambda: asyncio.run(checker(app)), daemon=True).start()
 
-updater.start_polling()
-updater.idle()
+    # Botni ishga tushiramiz
+    await app.run_polling()
+
+
+if __name__ == "__main__":
+    asyncio.run(main())
